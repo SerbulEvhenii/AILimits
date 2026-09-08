@@ -14,9 +14,9 @@ using Microsoft.Win32;
 [assembly: System.Reflection.AssemblyTitle("AILimits")]
 [assembly: System.Reflection.AssemblyDescription("Codex quota indicator for the Windows 11 taskbar")]
 [assembly: System.Reflection.AssemblyProduct("AILimits")]
-[assembly: System.Reflection.AssemblyVersion("0.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("0.1")]
+[assembly: System.Reflection.AssemblyVersion("0.2.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.2.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("0.2")]
 
 static class Program
 {
@@ -72,14 +72,14 @@ static class Codex
         if (Get(window, "usedPercent") == null) return "—";
         double used = Convert.ToDouble(Get(window, "usedPercent"));
         int mins = Get(window, "windowDurationMins") == null ? 0 : Convert.ToInt32(Get(window, "windowDurationMins"));
-        string label = mins == 10080 ? "7д" : mins > 0 && mins % 60 == 0 ? (mins / 60) + "г" : mins > 0 ? mins + "хв" : "Ліміт";
+        string label = mins == 10080 ? Ui.Text("7д", "7d") : mins > 0 && mins % 60 == 0 ? (mins / 60) + Ui.Text("г", "h") : mins > 0 ? mins + Ui.Text("хв", "min") : Ui.Text("Ліміт", "Limit");
         return label + ": " + Math.Max(0, Math.Min(100, 100 - used)).ToString("0") + "%";
     }
     internal static string Format(Dictionary<string, object> response)
     {
         var buckets = Map(Get(response, "rateLimitsByLimitId"));
         var bucket = Map(Get(buckets, "codex")) ?? Map(Get(response, "rateLimits"));
-        if (bucket == null) return "Codex: немає даних";
+        if (bucket == null) return Ui.Text("Codex: немає даних", "Codex: no data");
         var primary = Get(bucket, "primary");
         var secondary = Get(bucket, "secondary");
         return "Codex   " + Window(primary) + (secondary == null ? "" : "   ·   " + Window(secondary));
@@ -121,7 +121,7 @@ sealed class Indicator : Form
     readonly Bitmap codexDark = LoadIcon("codex-dark.png");
     readonly Bitmap codexLight = LoadIcon("codex-light.png");
     readonly Font updatedFont = new Font("Segoe UI", 7f);
-    string caption = "Codex: підключення…";
+    string caption;
     int backgroundLevel = -1;
     bool? updateSucceeded;
     bool fetching;
@@ -147,6 +147,8 @@ sealed class Indicator : Form
     }
     internal Indicator(bool openSettings = false)
     {
+        Ui.Language = settings.Language;
+        caption = Ui.Text("Codex: підключення…", "Codex: connecting…");
         Text = "AILimits Taskbar";
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -158,9 +160,9 @@ sealed class Indicator : Form
         BackColor = Color.FromArgb(1, 2, 3);
         TransparencyKey = BackColor;
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Налаштування…", null, delegate { OpenSettings(); });
-        menu.Items.Add("Оновити", null, async delegate { await RefreshQuota(); });
-        menu.Items.Add("Закрити індикатор", null, delegate { Close(); });
+        menu.Items.Add(Ui.Text("Налаштування…", "Settings…"), null, delegate { OpenSettings(); });
+        menu.Items.Add(Ui.Text("Оновити", "Refresh"), null, async delegate { await RefreshQuota(); });
+        menu.Items.Add(Ui.Text("Закрити індикатор", "Exit widget"), null, delegate { Close(); });
         ContextMenuStrip = menu;
         layoutTimer.Tick += delegate { Attach(); };
         refreshTimer.Tick += async delegate { await RefreshQuota(); };
@@ -178,16 +180,20 @@ sealed class Indicator : Form
             settingsForm = null;
             if (dialog.DialogResult == DialogResult.OK && !IsDisposed) {
                 settings = dialog.Result;
+                Ui.Language = settings.Language;
+                ContextMenuStrip.Items[0].Text = Ui.Text("Налаштування…", "Settings…");
+                ContextMenuStrip.Items[1].Text = Ui.Text("Оновити", "Refresh");
+                ContextMenuStrip.Items[2].Text = Ui.Text("Закрити індикатор", "Exit widget");
+                tip.SetToolTip(this, Ui.Text("Codex: підключення…", "Codex: connecting…"));
                 refreshTimer.Interval = settings.RefreshSeconds * 1000;
                 refreshTimer.Stop(); refreshTimer.Start();
-                caption = "Codex: підключення…"; backgroundLevel = -1; updateSucceeded = null;
+                caption = Ui.Text("Codex: підключення…", "Codex: connecting…"); backgroundLevel = -1; updateSucceeded = null;
                 fiveHourReset = null; lastSuccess = default(DateTime); Invalidate();
                 BeginInvoke(new Action(async delegate { await RefreshQuota(); }));
             }
             dialog.Dispose();
         };
         dialog.Show();
-        Native.SetWindowPos(dialog.Handle, IntPtr.Zero, 0, 0, 510, 470, 0x0040 | 0x0002);
         Native.SetForegroundWindow(dialog.Handle);
     }
     async Task RefreshQuota()
@@ -198,21 +204,21 @@ sealed class Indicator : Form
         try {
             var data = await Task.Run(() => Codex.Read(requestSettings.Home));
             if (IsDisposed || requestSettings != settings) return;
-            if (Codex.BackgroundLevel(data) < 0) throw new IOException("Не отримано актуальні дані п’ятигодинного ліміту Codex.");
+            if (Codex.BackgroundLevel(data) < 0) throw new IOException(Ui.Text("Не отримано актуальні дані п’ятигодинного ліміту Codex.", "Current five-hour Codex quota data is unavailable."));
             caption = Codex.Format(data);
             backgroundLevel = Codex.BackgroundLevel(data);
             fiveHourReset = Codex.FiveHourReset(data);
             lastSuccess = DateTime.Now;
-            tip.SetToolTip(this, "Залишок квоти Codex. Оновлено " + lastSuccess.ToString("HH:mm:ss"));
+            tip.SetToolTip(this, Ui.Text("Залишок квоти Codex. Оновлено ", "Remaining Codex quota. Updated ") + lastSuccess.ToString("HH:mm:ss"));
             File.WriteAllText(Path.Combine(Program.DataDir, "status.json"), new JavaScriptSerializer().Serialize(new { updatedAt = DateTime.UtcNow.ToString("o"), text = caption }));
             updateSucceeded = true;
-        } catch (Exception e) {
+        } catch {
             if (IsDisposed || requestSettings != settings) return;
             updateSucceeded = false;
-            caption = "Codex: " + (lastSuccess == default(DateTime) ? "немає зв’язку" : "дані застаріли");
+            caption = "Codex: " + (lastSuccess == default(DateTime) ? Ui.Text("немає зв’язку", "offline") : Ui.Text("дані застаріли", "data is stale"));
             backgroundLevel = -1;
             fiveHourReset = null;
-            tip.SetToolTip(this, e.Message);
+            tip.SetToolTip(this, Ui.Text("Не вдалося оновити квоту. Перевірте з’єднання та вхід у Codex.", "Could not refresh the quota. Check your connection and Codex sign-in."));
         } finally {
             fetching = false;
             if (!IsDisposed) {
@@ -316,8 +322,8 @@ sealed class Indicator : Form
         TextRenderer.DrawText(e.Graphics, displayText, Font, textBounds, ForeColor, panelColor,
             TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         string updatedText = fiveHourReset.HasValue
-            ? "Скидання о " + fiveHourReset.Value.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
-            : "Скидання: —";
+            ? Ui.Text("Скидання о ", "Resets at ") + fiveHourReset.Value.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : Ui.Text("Скидання: —", "Reset: —");
         var updatedBounds = new Rectangle(padding, (int)panel.Top + (int)(23 * scale),
             Math.Max(0, panelWidth - 2 * padding), (int)(12 * scale));
         TextRenderer.DrawText(e.Graphics, updatedText, updatedFont, updatedBounds, ForeColor, panelColor,
@@ -361,6 +367,7 @@ static class Tests
 {
     internal static void Run()
     {
+        Ui.Language = "uk";
         SettingsChecks.Validate();
         var json = new JavaScriptSerializer();
         Action<string, string> check = delegate(string fixture, string expected) {
@@ -385,6 +392,13 @@ static class Tests
         foreach (string fixture in new[] { "{}", "{\"rateLimits\":{\"primary\":{\"windowDurationMins\":300}}}", "{\"rateLimits\":{\"primary\":{\"windowDurationMins\":10080,\"resetsAt\":1700000000}}}" }) {
             if (Codex.FiveHourReset(json.Deserialize<Dictionary<string, object>>(fixture)) != null) throw new Exception("Expected unknown five-hour reset");
         }
-        File.WriteAllText(Path.Combine(Program.DataDir, "tests.txt"), "PASS: 6 quota formatting; 9 background; 4 reset timestamp cases");
+        Ui.Language = "en";
+        check("{}", "Codex: no data");
+        check("{\"rateLimits\":{\"primary\":{\"usedPercent\":16,\"windowDurationMins\":300},\"secondary\":{\"usedPercent\":3,\"windowDurationMins\":10080}}}", "Codex   5h: 84%   ·   7d: 97%");
+        check("{\"rateLimits\":{\"primary\":{\"usedPercent\":-10,\"windowDurationMins\":15}}}", "Codex   15min: 100%");
+        check("{\"rateLimits\":{\"primary\":{\"usedPercent\":50}}}", "Codex   Limit: 50%");
+        Ui.Language = "uk";
+        check("{}", "Codex: немає даних");
+        File.WriteAllText(Path.Combine(Program.DataDir, "tests.txt"), "PASS: 11 bilingual quota formatting; 9 background; 4 reset timestamp cases; settings validation, language roundtrip and legacy fallback");
     }
 }

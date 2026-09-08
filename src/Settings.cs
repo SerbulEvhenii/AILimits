@@ -8,18 +8,26 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
+static class Ui
+{
+    internal static string Language = "uk";
+    internal static string Text(string ukrainian, string english) { return Language == "en" ? english : ukrainian; }
+}
+
 sealed class WidgetSettings
 {
+    public string Language { get; set; }
     public int RefreshSeconds { get; set; }
     public string ProfileId { get; set; }
     public string AccountLabel { get; set; }
     internal string Home { get { return string.IsNullOrEmpty(ProfileId) ? null : Path.Combine(Program.DataDir, "accounts", ProfileId); } }
-    public WidgetSettings() { RefreshSeconds = 60; }
+    public WidgetSettings() { RefreshSeconds = 60; Language = "uk"; }
     internal void Validate()
     {
-        if (RefreshSeconds < 15 || RefreshSeconds > 3600) throw new ArgumentException("Інтервал має бути від 15 до 3600 секунд.");
+        if (Language != "uk" && Language != "en") Language = "uk";
+        if (RefreshSeconds < 15 || RefreshSeconds > 3600) throw new ArgumentException(Ui.Text("Інтервал має бути від 15 до 3600 секунд.", "The refresh interval must be between 15 and 3600 seconds."));
         Guid id;
-        if (!string.IsNullOrEmpty(ProfileId) && !Guid.TryParseExact(ProfileId, "N", out id)) throw new ArgumentException("Некоректний профіль акаунта.");
+        if (!string.IsNullOrEmpty(ProfileId) && !Guid.TryParseExact(ProfileId, "N", out id)) throw new ArgumentException(Ui.Text("Некоректний профіль акаунта.", "Invalid account profile."));
     }
     internal static WidgetSettings Load()
     {
@@ -64,15 +72,15 @@ sealed class CodexSession : IDisposable
     }
     internal async Task Initialize()
     {
-        await Request("initialize", new { clientInfo = new { name = "ai_limits_taskbar", title = "AI Limits Taskbar", version = "0.1.0" } });
+        await Request("initialize", new { clientInfo = new { name = "ai_limits_taskbar", title = "AI Limits Taskbar", version = "0.2.0" } });
         await process.StandardInput.WriteLineAsync("{\"method\":\"initialized\",\"params\":{}}");
     }
     async Task<Dictionary<string, object>> Next(Task deadline)
     {
         var read = process.StandardOutput.ReadLineAsync();
-        if (await Task.WhenAny(read, deadline) != read) throw new TimeoutException("Час очікування Codex вичерпано.");
+        if (await Task.WhenAny(read, deadline) != read) throw new TimeoutException(Ui.Text("Час очікування Codex вичерпано.", "Codex timed out."));
         string line = await read;
-        if (line == null) throw new IOException("Codex закрив з’єднання.");
+        if (line == null) throw new IOException(Ui.Text("Codex закрив з’єднання.", "Codex closed the connection."));
         return json.Deserialize<Dictionary<string, object>>(line);
     }
     internal async Task<Dictionary<string, object>> Request(string method, object args)
@@ -102,7 +110,7 @@ sealed class CodexSession : IDisposable
                     if (Convert.ToString(Codex.Get(msg, "method")) != "account/login/completed") continue;
                     var args = Codex.Map(Codex.Get(msg, "params"));
                     if (Convert.ToString(Codex.Get(args, "loginId")) != loginId) continue;
-                    if (!object.Equals(Codex.Get(args, "success"), true)) throw new IOException("Вхід не завершено. Спробуйте ще раз.");
+                    if (!object.Equals(Codex.Get(args, "success"), true)) throw new IOException(Ui.Text("Вхід не завершено. Спробуйте ще раз.", "Sign-in did not complete. Please try again."));
                     return;
                 }
             } finally { timeout.Cancel(); }
@@ -117,14 +125,15 @@ sealed class CodexSession : IDisposable
 
 sealed class SettingsForm : Form
 {
+    readonly ComboBox language = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
     readonly NumericUpDown interval = new NumericUpDown { Minimum = 15, Maximum = 3600, Increment = 15, Width = 110 };
-    readonly RadioButton shared = new RadioButton { Text = "Акаунт із застосунку Codex", AutoSize = true };
-    readonly RadioButton separate = new RadioButton { Text = "Окремий акаунт для віджета", AutoSize = true };
+    readonly RadioButton shared = new RadioButton { Text = Ui.Text("Акаунт із застосунку Codex", "Use the Codex app account"), AutoSize = true };
+    readonly RadioButton separate = new RadioButton { Text = Ui.Text("Окремий акаунт для віджета", "Use a separate widget account"), AutoSize = true };
     readonly Label account = new Label { AutoSize = false, Height = 38, Width = 440 };
     readonly Label status = new Label { AutoSize = false, Height = 48, Width = 440 };
-    readonly Button login = new Button { Text = "Увійти в інший акаунт…", Width = 230, Height = 32 };
-    readonly Button save = new Button { Text = "Зберегти", Width = 110, Height = 32 };
-    readonly Button cancelLogin = new Button { Text = "Скасувати вхід", Width = 140, Height = 32, Visible = false };
+    readonly Button login = new Button { Text = Ui.Text("Увійти в інший акаунт…", "Sign in to another account…"), Width = 230, Height = 32 };
+    readonly Button save = new Button { Text = Ui.Text("Зберегти", "Save"), Width = 110, Height = 32 };
+    readonly Button cancelLogin = new Button { Text = Ui.Text("Скасувати вхід", "Cancel sign-in"), Width = 140, Height = 32, Visible = false };
     CancellationTokenSource loginCancel;
     string profileId;
     string accountLabel;
@@ -132,10 +141,10 @@ sealed class SettingsForm : Form
     internal WidgetSettings Result { get; private set; }
     internal SettingsForm(WidgetSettings current)
     {
-        Text = "Налаштування AILimits";
+        Text = Ui.Text("Налаштування AILimits", "AILimits Settings");
         Font = new Font("Segoe UI", 10f);
         AutoScaleMode = AutoScaleMode.None;
-        ClientSize = new Size(490, 425);
+        ClientSize = new Size(490, 515);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -145,18 +154,23 @@ sealed class SettingsForm : Form
         profileId = current.ProfileId; accountLabel = current.AccountLabel;
         interval.Value = current.RefreshSeconds;
         var content = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(20), AutoScroll = true };
-        content.Controls.Add(new Label { Text = "Частота оновлення квоти", AutoSize = true, Margin = new Padding(3, 0, 3, 8) });
+        content.Controls.Add(new Label { Text = Ui.Text("Мова / Language", "Language / Мова"), AutoSize = true });
+        language.Items.AddRange(new object[] { "Українська", "English" });
+        language.SelectedIndex = current.Language == "en" ? 1 : 0;
+        content.Controls.Add(language);
+        content.Controls.Add(new Label { Text = Ui.Text("Мова зміниться після збереження.", "The language changes when you save."), AutoSize = true, Margin = new Padding(3, 3, 3, 12) });
+        content.Controls.Add(new Label { Text = Ui.Text("Частота оновлення квоти", "Quota refresh interval"), AutoSize = true, Margin = new Padding(3, 0, 3, 8) });
         var frequency = new FlowLayoutPanel { Width = 440, Height = 40 };
         frequency.Controls.Add(interval);
-        frequency.Controls.Add(new Label { Text = "секунд (15–3600)", AutoSize = true, Margin = new Padding(8, 5, 0, 0) });
+        frequency.Controls.Add(new Label { Text = Ui.Text("секунд (15–3600)", "seconds (15–3600)"), AutoSize = true, Margin = new Padding(8, 5, 0, 0) });
         content.Controls.Add(frequency);
         content.Controls.Add(shared); content.Controls.Add(separate); content.Controls.Add(account);
         var authButtons = new FlowLayoutPanel { Width = 440, Height = 42 };
         authButtons.Controls.Add(login); authButtons.Controls.Add(cancelLogin); content.Controls.Add(authButtons);
-        content.Controls.Add(new Label { Text = "Окремий вхід відкривається у браузері та діє лише для віджета. Поточний акаунт Codex не зміниться.", Width = 440, Height = 48 });
+        content.Controls.Add(new Label { Text = Ui.Text("Окремий вхід відкривається у браузері та діє лише для віджета. Поточний акаунт Codex не зміниться.", "Separate sign-in opens in your browser and applies only to this widget. Your current Codex account stays unchanged."), Width = 440, Height = 48 });
         content.Controls.Add(status);
         var buttons = new FlowLayoutPanel { Width = 440, Height = 42, FlowDirection = FlowDirection.RightToLeft };
-        var close = new Button { Text = "Скасувати", Width = 110, Height = 32, DialogResult = DialogResult.Cancel };
+        var close = new Button { Text = Ui.Text("Скасувати", "Cancel"), Width = 110, Height = 32, DialogResult = DialogResult.Cancel };
         close.Click += delegate { Close(); };
         buttons.Controls.Add(close); buttons.Controls.Add(save); content.Controls.Add(buttons);
         Controls.Add(content); CancelButton = close; AcceptButton = save;
@@ -166,38 +180,38 @@ sealed class SettingsForm : Form
         login.Click += async delegate { await Login(); };
         cancelLogin.Click += delegate { if (loginCancel != null) loginCancel.Cancel(); };
         save.Click += delegate {
-            if (separate.Checked && string.IsNullOrEmpty(profileId)) { status.Text = "Спочатку увійдіть в окремий акаунт."; return; }
+            if (separate.Checked && string.IsNullOrEmpty(profileId)) { status.Text = Ui.Text("Спочатку увійдіть в окремий акаунт.", "Sign in to a separate account first."); return; }
             try {
-                Result = new WidgetSettings { RefreshSeconds = (int)interval.Value, ProfileId = shared.Checked ? null : profileId, AccountLabel = shared.Checked ? null : accountLabel };
+                Result = new WidgetSettings { Language = language.SelectedIndex == 1 ? "en" : "uk", RefreshSeconds = (int)interval.Value, ProfileId = shared.Checked ? null : profileId, AccountLabel = shared.Checked ? null : accountLabel };
                 Result.Save(); DialogResult = DialogResult.OK; Close();
-            } catch (Exception e) { status.Text = "Не вдалося зберегти: " + e.Message; }
+            } catch { status.Text = Ui.Text("Не вдалося зберегти налаштування. Перевірте доступ до локальної папки даних.", "Could not save settings. Check access to the local data folder."); }
         };
         FormClosing += delegate { if (loginCancel != null) loginCancel.Cancel(); accountReadVersion++; };
     }
     async Task ReadAccount()
     {
         int version = ++accountReadVersion;
-        if (separate.Checked && string.IsNullOrEmpty(profileId)) { account.Text = "Окремий акаунт ще не підключений."; return; }
+        if (separate.Checked && string.IsNullOrEmpty(profileId)) { account.Text = Ui.Text("Окремий акаунт ще не підключений.", "No separate account is connected yet."); return; }
         string home = shared.Checked ? null : Path.Combine(Program.DataDir, "accounts", profileId);
-        account.Text = "Перевірка акаунта…";
+        account.Text = Ui.Text("Перевірка акаунта…", "Checking account…");
         try {
             string label = await Task.Run(async delegate {
                 using (var session = new CodexSession(home)) { await session.Initialize(); return AccountName(await session.Request("account/read", new { refreshToken = false })); }
             });
             if (!IsDisposed && version == accountReadVersion) account.Text = label;
-        } catch { if (!IsDisposed && version == accountReadVersion) account.Text = "Не вдалося перевірити акаунт. Можна повторити вхід."; }
+        } catch { if (!IsDisposed && version == accountReadVersion) account.Text = Ui.Text("Не вдалося перевірити акаунт. Можна повторити вхід.", "Could not check the account. Try signing in again."); }
     }
     static string AccountName(Dictionary<string, object> result)
     {
         var info = Codex.Map(Codex.Get(result, "account"));
-        if (info == null) return "Вхід не виконано";
+        if (info == null) return Ui.Text("Вхід не виконано", "Not signed in");
         return Convert.ToString(Codex.Get(info, "email")) + "  ·  " + Convert.ToString(Codex.Get(info, "planType"));
     }
     async Task Login()
     {
         loginCancel = new CancellationTokenSource();
         login.Enabled = save.Enabled = shared.Enabled = separate.Enabled = false;
-        cancelLogin.Visible = true; status.Text = "Відкриваємо браузер для входу…";
+        cancelLogin.Visible = true; status.Text = Ui.Text("Відкриваємо браузер для входу…", "Opening your browser to sign in…");
         string candidate = Guid.NewGuid().ToString("N");
         string home = Path.Combine(Program.DataDir, "accounts", candidate);
         try {
@@ -206,17 +220,17 @@ sealed class SettingsForm : Form
                 var result = await session.Request("account/login/start", new { type = "chatgpt" });
                 loginCancel.Token.ThrowIfCancellationRequested();
                 Uri url;
-                if (!Uri.TryCreate(Convert.ToString(Codex.Get(result, "authUrl")), UriKind.Absolute, out url) || url.Scheme != "https" || !(url.Host == "auth.openai.com" || url.Host == "chatgpt.com")) throw new IOException("Неочікувана адреса входу.");
+                if (!Uri.TryCreate(Convert.ToString(Codex.Get(result, "authUrl")), UriKind.Absolute, out url) || url.Scheme != "https" || !(url.Host == "auth.openai.com" || url.Host == "chatgpt.com")) throw new IOException(Ui.Text("Неочікувана адреса входу.", "Unexpected sign-in address."));
                 Process.Start(new ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true });
-                status.Text = "Завершіть вхід у браузері. Очікування — до 5 хвилин.";
+                status.Text = Ui.Text("Завершіть вхід у браузері. Очікування — до 5 хвилин.", "Complete sign-in in your browser. Waiting up to 5 minutes.");
                 await session.WaitLogin(Convert.ToString(Codex.Get(result, "loginId")), loginCancel.Token);
                 var info = await session.Request("account/read", new { refreshToken = false });
                 if (IsDisposed) return;
                 profileId = candidate; accountLabel = AccountName(info);
                 separate.Checked = true; account.Text = accountLabel;
-                status.Text = "Вхід виконано. Натисніть «Зберегти», щоб застосувати акаунт.";
+                status.Text = Ui.Text("Вхід виконано. Натисніть «Зберегти», щоб застосувати акаунт.", "Signed in. Click Save to apply this account.");
             }
-        } catch (Exception e) { if (!IsDisposed) status.Text = loginCancel.IsCancellationRequested ? "Вхід скасовано." : "Помилка входу: " + e.Message; }
+        } catch { if (!IsDisposed) status.Text = loginCancel.IsCancellationRequested ? Ui.Text("Вхід скасовано.", "Sign-in canceled.") : Ui.Text("Не вдалося увійти. Перевірте з’єднання та спробуйте ще раз.", "Could not sign in. Check your connection and try again."); }
         finally {
             loginCancel.Dispose(); loginCancel = null;
             if (!IsDisposed) { login.Enabled = save.Enabled = shared.Enabled = separate.Enabled = true; cancelLogin.Visible = false; }
@@ -242,6 +256,17 @@ static class SettingsChecks
         var restored = json.Deserialize<WidgetSettings>(json.Serialize(value));
         restored.Validate();
         if (restored.RefreshSeconds != 120 || restored.Home != value.Home) throw new Exception("Settings roundtrip failed");
+        foreach (string language in new[] { "uk", "en" }) {
+            value.Language = language;
+            restored = json.Deserialize<WidgetSettings>(json.Serialize(value));
+            restored.Validate();
+            if (restored.Language != language || restored.RefreshSeconds != 120 || restored.Home != value.Home || restored.AccountLabel != "test") throw new Exception("Language settings roundtrip failed");
+        }
+        foreach (string fixture in new[] { "{\"RefreshSeconds\":120}", "{\"RefreshSeconds\":120,\"Language\":null}", "{\"RefreshSeconds\":120,\"Language\":\"de\"}" }) {
+            restored = json.Deserialize<WidgetSettings>(fixture);
+            restored.Validate();
+            if (restored.Language != "uk" || restored.RefreshSeconds != 120) throw new Exception("Legacy language fallback failed");
+        }
     }
     internal static async Task Auth()
     {
