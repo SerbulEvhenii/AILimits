@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -12,6 +14,45 @@ static class Ui
 {
     internal static string Language = "uk";
     internal static string Text(string ukrainian, string english) { return Language == "en" ? english : ukrainian; }
+}
+
+static class Startup
+{
+    internal static readonly string ShortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "AILimits.lnk");
+    internal static bool Enabled { get { return File.Exists(ShortcutPath); } }
+
+    // Use the same per-user shortcut as install.ps1; no administrator access needed.
+    internal static void Save(bool enabled, Action saveSettings)
+    {
+        byte[] previous = Enabled ? File.ReadAllBytes(ShortcutPath) : null;
+        bool changed = enabled != (previous != null);
+        if (!changed) { saveSettings(); return; }
+        string temp = Path.Combine(Path.GetDirectoryName(ShortcutPath), "AILimits-" + Guid.NewGuid().ToString("N") + ".lnk");
+        try {
+            if (enabled) {
+                object shell = null, shortcut = null;
+                try {
+                    shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true));
+                    shortcut = shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { temp });
+                    var type = shortcut.GetType();
+                    type.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { Application.ExecutablePath });
+                    type.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { Path.GetDirectoryName(Application.ExecutablePath) });
+                    type.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { "AILimits taskbar widget" });
+                    type.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+                } finally {
+                    if (shortcut != null) Marshal.FinalReleaseComObject(shortcut);
+                    if (shell != null) Marshal.FinalReleaseComObject(shell);
+                }
+                File.Move(temp, ShortcutPath);
+            } else File.Delete(ShortcutPath);
+            try { saveSettings(); }
+            catch {
+                if (previous == null) File.Delete(ShortcutPath);
+                else File.WriteAllBytes(ShortcutPath, previous);
+                throw;
+            }
+        } finally { if (File.Exists(temp)) File.Delete(temp); }
+    }
 }
 
 sealed class WidgetSettings
@@ -72,7 +113,7 @@ sealed class CodexSession : IDisposable
     }
     internal async Task Initialize()
     {
-        await Request("initialize", new { clientInfo = new { name = "ai_limits_taskbar", title = "AI Limits Taskbar", version = "0.2.0" } });
+        await Request("initialize", new { clientInfo = new { name = "ai_limits_taskbar", title = "AI Limits Taskbar", version = "0.3.0" } });
         await process.StandardInput.WriteLineAsync("{\"method\":\"initialized\",\"params\":{}}");
     }
     async Task<Dictionary<string, object>> Next(Task deadline)
@@ -125,6 +166,7 @@ sealed class CodexSession : IDisposable
 
 sealed class SettingsForm : Form
 {
+    readonly CheckBox startup = new CheckBox { Text = Ui.Text("Запускати разом із Windows", "Start with Windows"), AutoSize = true };
     readonly ComboBox language = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
     readonly NumericUpDown interval = new NumericUpDown { Minimum = 15, Maximum = 3600, Increment = 15, Width = 110 };
     readonly RadioButton shared = new RadioButton { Text = Ui.Text("Акаунт із застосунку Codex", "Use the Codex app account"), AutoSize = true };
@@ -144,7 +186,7 @@ sealed class SettingsForm : Form
         Text = Ui.Text("Налаштування AILimits", "AILimits Settings");
         Font = new Font("Segoe UI", 10f);
         AutoScaleMode = AutoScaleMode.None;
-        ClientSize = new Size(490, 515);
+        ClientSize = new Size(490, 555);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -164,6 +206,9 @@ sealed class SettingsForm : Form
         frequency.Controls.Add(interval);
         frequency.Controls.Add(new Label { Text = Ui.Text("секунд (15–3600)", "seconds (15–3600)"), AutoSize = true, Margin = new Padding(8, 5, 0, 0) });
         content.Controls.Add(frequency);
+        startup.Checked = Startup.Enabled;
+        startup.Margin = new Padding(3, 3, 3, 12);
+        content.Controls.Add(startup);
         content.Controls.Add(shared); content.Controls.Add(separate); content.Controls.Add(account);
         var authButtons = new FlowLayoutPanel { Width = 440, Height = 42 };
         authButtons.Controls.Add(login); authButtons.Controls.Add(cancelLogin); content.Controls.Add(authButtons);
@@ -183,8 +228,10 @@ sealed class SettingsForm : Form
             if (separate.Checked && string.IsNullOrEmpty(profileId)) { status.Text = Ui.Text("Спочатку увійдіть в окремий акаунт.", "Sign in to a separate account first."); return; }
             try {
                 Result = new WidgetSettings { Language = language.SelectedIndex == 1 ? "en" : "uk", RefreshSeconds = (int)interval.Value, ProfileId = shared.Checked ? null : profileId, AccountLabel = shared.Checked ? null : accountLabel };
-                Result.Save(); DialogResult = DialogResult.OK; Close();
-            } catch { status.Text = Ui.Text("Не вдалося зберегти налаштування. Перевірте доступ до локальної папки даних.", "Could not save settings. Check access to the local data folder."); }
+                Result.Validate();
+                Startup.Save(startup.Checked, Result.Save);
+                DialogResult = DialogResult.OK; Close();
+            } catch { Result = null; status.Text = Ui.Text("Не вдалося зберегти. Перевірте доступ до папок даних і автозавантаження.", "Could not save. Check access to the data and Startup folders."); }
         };
         FormClosing += delegate { if (loginCancel != null) loginCancel.Cancel(); accountReadVersion++; };
     }
