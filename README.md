@@ -5,7 +5,7 @@
 <h1 align="center">AILimits</h1>
 <p align="center"><strong>Your Codex quota. Always in sight.</strong></p>
 <p align="center">A compact Windows 11 taskbar companion that shows your remaining Codex limits, reset time, and connection status — in Ukrainian or English.</p>
-<p align="center"><a href="https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4.1">Download v0.4.1</a> · <a href="#getting-started">Getting started</a> · <a href="#privacy">Privacy</a> · <a href="https://github.com/SerbulEvhenii/AILimits/issues">Report an issue</a></p>
+<p align="center"><a href="https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4.2">Download v0.4.2</a> · <a href="#getting-started">Getting started</a> · <a href="#privacy">Privacy</a> · <a href="https://github.com/SerbulEvhenii/AILimits/issues">Report an issue</a></p>
 
 ## Stay focused, stay informed
 
@@ -23,6 +23,10 @@ AILimits sits beside Windows Widgets on your taskbar, keeping your Codex allowan
 - **Start with Windows**, controlled by a checkbox in Settings for your Windows user without administrator access.
 
 For example, `5h: 84% · 7d: 97%` means **84% remaining in the five-hour window** and **97% remaining in the weekly window**. In Ukrainian, the same values appear as `5г: 84% · 7д: 97%`.
+
+## New in v0.4.2
+
+Taskbar UI Automation runs on one dedicated background MTA thread, keeping the widget UI and quota refreshes independent of slow or unresponsive layout queries. Old layouts are rejected after ten seconds or when the taskbar window/process changes. The widget recreates its attachment window and retries when Explorer restarts. Closing the widget does not wait for a blocked layout query.
 
 ## New in v0.4.1
 
@@ -56,16 +60,16 @@ Ukrainian remains the default, including when upgrading from v0.1. Your existing
 
 ### Run the executable
 
-1. Download **AILimits-v0.4.1-win-x64.exe** from [Releases](https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4.1).
+1. Download **AILimits-v0.4.2-win-x64.exe** from [Releases](https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4.2).
 2. Run the executable. The indicator appears beside Windows Widgets when the supported layout is available.
 3. Right-click it to open **Налаштування… / Settings…**, **Оновити / Refresh**, or **Закрити індикатор / Exit widget**.
 4. To switch to English, open **Налаштування…**, choose **English** under **Мова / Language**, and click **Зберегти**.
 
-The v0.4.1 executable is unsigned, so Windows may show an unknown-publisher warning. Download only from this repository's releases; SHA-256 checksums are included.
+The v0.4.2 executable is unsigned, so Windows may show an unknown-publisher warning. Download only from this repository's releases; SHA-256 checksums are included.
 
 ### Install with automatic startup
 
-Download and extract **AILimits-v0.4.1-win-x64.zip**, then run PowerShell in the extracted folder:
+Download and extract **AILimits-v0.4.2-win-x64.zip**, then run PowerShell in the extracted folder:
 
 ```powershell
 .\scripts\install.ps1
@@ -123,7 +127,7 @@ The build uses the C# compiler supplied with the 64-bit .NET Framework installat
 Get-Content "$env:LOCALAPPDATA\AILimits\tests.txt"
 ```
 
-The executable is written to `bin/AILimits.exe`. Embedded checks cover Ukrainian and English quota formatting, switching back to Ukrainian, independent color thresholds, window selection, both reset timestamps, countdown boundaries and time zones, settings validation, language serialization, and migration from settings without a language field. They use synthetic fixtures and do not query your account.
+The executable is written to `bin/AILimits.exe`. Embedded checks cover Ukrainian and English quota formatting, switching back to Ukrainian, independent color thresholds, window selection, both reset timestamps, countdown boundaries and time zones, settings validation, language serialization, and migration from settings without a language field. Taskbar checks cover the MTA worker, nonblocking shutdown, stale layout rejection, and retry after a simulated provider error. They use synthetic fixtures and do not query your account.
 
 To recreate the release executable, ZIP package, and checksums:
 
@@ -139,8 +143,8 @@ AILimits is a C# / .NET Framework desktop process. It embeds a Win32 child windo
 
 Each refresh starts a short-lived local Codex app-server session, reads `account/rateLimits/read`, and closes the session. If the required taskbar elements or enough free space are unavailable, the indicator hides to avoid covering taskbar buttons.
 
-## v0.4.1 limitations
+## v0.4.2 limitations
 
-This is an early release using an unofficial taskbar integration. Windows updates may require compatibility fixes. Multi-monitor layouts, DPI changes, auto-hide, fullscreen behavior, and Explorer restarts have not received complete interactive validation. Restart AILimits if it does not reattach after Explorer restarts. End-to-end switching to another account also requires further user testing.
+This is an early release using an unofficial taskbar integration. Windows updates may require compatibility fixes. Multi-monitor layouts, DPI changes, auto-hide, fullscreen behavior, and Explorer restarts have not received complete interactive validation. Attachment retries automatically after Explorer restarts. If the UI Automation provider stays blocked indefinitely, quota refreshes remain independent, but attachment may still require restarting AILimits. End-to-end switching to another account also requires further user testing.
 
 AILimits is an independent project and is not affiliated with or endorsed by OpenAI or Microsoft. Codex and Windows belong to their respective owners.

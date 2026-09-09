@@ -7,16 +7,15 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
-using System.Windows.Automation;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("AILimits")]
 [assembly: System.Reflection.AssemblyDescription("Codex quota indicator for the Windows 11 taskbar")]
 [assembly: System.Reflection.AssemblyProduct("AILimits")]
-[assembly: System.Reflection.AssemblyVersion("0.4.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.4.1.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("0.4.1")]
+[assembly: System.Reflection.AssemblyVersion("0.4.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.4.2.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("0.4.2")]
 
 static class Program
 {
@@ -150,8 +149,8 @@ sealed class Indicator : Form
     SettingsForm settingsForm;
     QuotaDetailsForm detailsForm;
     IntPtr taskbar;
-    AutomationElement widgetsElement;
-    AutomationElement startElement;
+    uint taskbarProcessId;
+    TaskbarMonitor taskbarMonitor;
     Rectangle? attachedBounds;
     string attachmentStatus;
     DateTime lastSuccess;
@@ -189,9 +188,15 @@ sealed class Indicator : Form
         MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) OpenDetails(); };
         refreshTimer.Tick += async delegate { await RefreshQuota(); };
         refreshTimer.Interval = settings.RefreshSeconds * 1000;
-        Shown += async delegate { Attach(); layoutTimer.Start(); refreshTimer.Start(); if (openSettings) BeginInvoke(new Action(OpenSettings)); await RefreshQuota(); };
+        Shown += async delegate {
+            if (taskbarMonitor == null) taskbarMonitor = new TaskbarMonitor(new TaskbarReader().Read);
+            layoutTimer.Start(); refreshTimer.Start(); Attach();
+            if (openSettings) BeginInvoke(new Action(OpenSettings));
+            await RefreshQuota();
+        };
         FormClosing += delegate { if (settingsForm != null) settingsForm.Close(); if (detailsForm != null) detailsForm.Close(); };
         FormClosed += delegate { layoutTimer.Dispose(); refreshTimer.Dispose(); tip.Dispose(); codexDark.Dispose(); codexLight.Dispose(); updatedFont.Dispose(); };
+        Disposed += delegate { if (taskbarMonitor != null) taskbarMonitor.Stop(); };
     }
     void OpenSettings()
     {
@@ -286,51 +291,52 @@ sealed class Indicator : Form
     {
         try {
             var bar = Native.FindWindow("Shell_TrayWnd", null);
-            if (bar == IntPtr.Zero) { Native.ShowWindow(Handle, 0); return; }
-            Native.RECT rect;
-            Native.GetWindowRect(bar, out rect);
-            if (taskbar != bar || widgetsElement == null || startElement == null) {
-                var element = AutomationElement.FromHandle(bar);
-                widgetsElement = element.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, "WidgetsButton"));
-                startElement = element.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, "StartButton"));
+            uint processId;
+            Native.GetWindowThreadProcessId(bar, out processId);
+            if (bar == IntPtr.Zero) { HideIndicator("Taskbar unavailable", false); return; }
+            if (taskbar != IntPtr.Zero && (taskbar != bar || taskbarProcessId != processId)) {
+                taskbar = IntPtr.Zero; taskbarProcessId = 0; attachedBounds = null;
+                if (IsHandleCreated) { Native.ShowWindow(Handle, 0); RecreateHandle(); }
             }
-            if (widgetsElement == null || startElement == null) { Native.ShowWindow(Handle, 0); return; }
-            var wr = widgetsElement.Current.BoundingRectangle;
-            var sr = startElement.Current.BoundingRectangle;
-            double scale = Native.GetDpiForWindow(bar) / 96.0;
-            int gap = (int)(12 * scale), x = (int)(wr.Right - rect.Left) + gap;
-            int width = Math.Min((int)(340 * scale), (int)(sr.Left - rect.Left) - x - gap);
-            if (width < 230 * scale || rect.Bottom - rect.Top > 100 * scale) { Native.ShowWindow(Handle, 0); return; }
+            var snapshot = taskbarMonitor == null ? null : taskbarMonitor.Current;
+            if (snapshot != null && snapshot.IsError) { HideIndicator(snapshot.Status, true); return; }
+            if (snapshot == null || !snapshot.IsCurrent(bar, processId, DateTime.UtcNow)) { HideIndicator("Waiting for current taskbar layout", false); return; }
+            if (!snapshot.Bounds.HasValue) { HideIndicator(snapshot.Status, false); return; }
+            if (!IsHandleCreated || !Native.IsWindow(Handle)) RecreateHandle();
             if (taskbar != bar || Native.GetParent(Handle) != bar) {
                 Native.SetWindowLongPtr(Handle, -16, new IntPtr((Native.GetWindowLongPtr(Handle, -16).ToInt64() & ~0x80000000L) | 0x40000000L));
                 Native.SetParent(Handle, bar);
                 if (Native.GetParent(Handle) != bar) throw new InvalidOperationException("Cannot attach to taskbar");
-                taskbar = bar;
+                taskbar = bar; taskbarProcessId = processId;
                 attachedBounds = null;
             }
             using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")) {
                 ForeColor = key != null && Convert.ToInt32(key.GetValue("SystemUsesLightTheme", 0)) == 1 ? Color.FromArgb(25, 25, 25) : Color.FromArgb(240, 240, 240);
             }
-            var bounds = new Rectangle(x, 0, width, rect.Bottom - rect.Top);
+            var bounds = snapshot.Bounds.Value;
             if (attachedBounds != bounds || !Native.IsWindowVisible(Handle)) {
                 Native.SetWindowPos(Handle, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x0010 | 0x0040);
                 attachedBounds = bounds;
             }
-            string status = "Parent=" + Native.GetParent(Handle) + " Taskbar=" + bar + " Child=" + ((Native.GetWindowLongPtr(Handle, -16).ToInt64() & 0x40000000L) != 0) + " X=" + x + " Width=" + width;
-            if (attachmentStatus != status) {
-                File.WriteAllText(Path.Combine(Program.DataDir, "attachment.txt"), status);
-                attachmentStatus = status;
-            }
+            RecordAttachment("Parent=" + Native.GetParent(Handle) + " Taskbar=" + bar + " Child=" + ((Native.GetWindowLongPtr(Handle, -16).ToInt64() & 0x40000000L) != 0) + " X=" + bounds.X + " Width=" + bounds.Width, false);
         } catch (Exception e) {
-            widgetsElement = null;
-            startElement = null;
-            Native.ShowWindow(Handle, 0);
-            string error = "Error: " + e.Message;
-            if (attachmentStatus != error) {
-                File.WriteAllText(Path.Combine(Program.DataDir, "attachment-error.txt"), e.Message);
-                attachmentStatus = error;
-            }
+            HideIndicator(e.Message, true);
         }
+    }
+    void HideIndicator(string status, bool error)
+    {
+        if (IsHandleCreated) Native.ShowWindow(Handle, 0);
+        attachedBounds = null;
+        RecordAttachment(status, error);
+    }
+    void RecordAttachment(string status, bool error)
+    {
+        string state = (error ? "Error: " : "") + status;
+        if (attachmentStatus == state) return;
+        attachmentStatus = state;
+        try { File.WriteAllText(Path.Combine(Program.DataDir, error ? "attachment-error.txt" : "attachment.txt"), status); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -476,6 +482,8 @@ sealed class QuotaDetailsForm : Form
 
 static class Native
 {
+    [DllImport("user32.dll")] internal static extern bool IsWindow(IntPtr window);
+    [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
     [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string name);
     [DllImport("user32.dll")] internal static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
@@ -499,6 +507,7 @@ static class Tests
     {
         Ui.Language = "uk";
         SettingsChecks.Validate();
+        TaskbarChecks.Run();
         var json = new JavaScriptSerializer();
         Action<string, string> check = delegate(string fixture, string expected) {
             string actual = Codex.Format(json.Deserialize<Dictionary<string, object>>(fixture));
@@ -549,6 +558,6 @@ static class Tests
             if (Codex.Countdown(now.AddMinutes(84), now.ToOffset(TimeSpan.FromHours(5))) != Codex.Countdown(now.AddMinutes(84), now)) throw new Exception("Countdown must use absolute time");
         }
         Ui.Language = "uk";
-        File.WriteAllText(Path.Combine(Program.DataDir, "tests.txt"), "PASS: bilingual quota formatting, independent colors and window selection, both reset timestamps, countdown boundaries and time zones; settings validation, language roundtrip and legacy fallback");
+        File.WriteAllText(Path.Combine(Program.DataDir, "tests.txt"), "PASS: bilingual quota formatting, independent colors and window selection, both reset timestamps, countdown boundaries and time zones; settings validation, language roundtrip and legacy fallback; taskbar MTA worker, nonblocking stop, stale layout rejection and provider recovery");
     }
 }
