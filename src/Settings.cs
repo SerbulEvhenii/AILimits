@@ -13,6 +13,7 @@ using System.Windows.Forms;
 static class Ui
 {
     internal static string Language = "uk";
+    internal static System.Globalization.CultureInfo Culture { get { return System.Globalization.CultureInfo.GetCultureInfo(Language == "en" ? "en-US" : "uk-UA"); } }
     internal static string Text(string ukrainian, string english) { return Language == "en" ? english : ukrainian; }
 }
 
@@ -248,7 +249,7 @@ sealed class SettingsForm : Form
             if (!IsDisposed && version == accountReadVersion) account.Text = label;
         } catch { if (!IsDisposed && version == accountReadVersion) account.Text = Ui.Text("Не вдалося перевірити акаунт. Можна повторити вхід.", "Could not check the account. Try signing in again."); }
     }
-    static string AccountName(Dictionary<string, object> result)
+    internal static string AccountName(Dictionary<string, object> result)
     {
         var info = Codex.Map(Codex.Get(result, "account"));
         if (info == null) return Ui.Text("Вхід не виконано", "Not signed in");

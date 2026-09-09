@@ -12,8 +12,9 @@
 AILimits sits beside Windows Widgets on your taskbar, keeping your Codex allowance visible while you work. No separate dashboard to keep open.
 
 - **Remaining quota** for the five-hour and weekly windows, displayed as percentages.
-- **Color cues** for the five-hour allowance: green at 90–100%, amber at 40–89%, and red below 40%.
-- **Reset time** shown in your local time zone.
+- **Independent color cues** for the five-hour and weekly allowances: green at 90–100%, amber at 40–89%, and red below 40%.
+- **Countdown to the five-hour reset**, updated locally between quota refreshes; the tooltip shows the exact local reset time.
+- **Details on left-click:** remaining quota, countdown and exact local reset date for both windows, active account, last update, and a Refresh button. Click outside the panel or press Escape to close it.
 - **Connection indicator** and explicit stale-data messages when a refresh fails.
 - **Light and dark taskbar support**, with a compact rounded design.
 - **Ukrainian and English interface**, selectable in Settings without restarting the widget.
@@ -24,6 +25,8 @@ AILimits sits beside Windows Widgets on your taskbar, keeping your Codex allowan
 For example, `5h: 84% · 7d: 97%` means **84% remaining in the five-hour window** and **97% remaining in the weekly window**. In Ukrainian, the same values appear as `5г: 84% · 7д: 97%`.
 
 ## New in v0.3
+
+The independent quota colors, countdown, and left-click details above are available in the current source build, after v0.3. The v0.3 downloads still use the previous five-hour background color and reset-time display.
 
 Turn **Start with Windows / Запускати разом із Windows** on or off in Settings, then click **Save / Зберегти**. AILimits creates or removes its per-user Startup shortcut, so it can launch automatically when you sign in to Windows. Cancel leaves startup unchanged. The checkbox reflects whether the existing `AILimits.lnk` shortcut is present, including one created by the installer.
 
@@ -112,7 +115,7 @@ The build uses the C# compiler supplied with the 64-bit .NET Framework installat
 Get-Content "$env:LOCALAPPDATA\AILimits\tests.txt"
 ```
 
-The executable is written to `bin/AILimits.exe`. Embedded checks cover Ukrainian and English quota formatting, switching back to Ukrainian, color thresholds, reset timestamps, settings validation, language serialization, and migration from settings without a language field. They use synthetic fixtures and do not query your account.
+The executable is written to `bin/AILimits.exe`. Embedded checks cover Ukrainian and English quota formatting, switching back to Ukrainian, independent color thresholds, window selection, both reset timestamps, countdown boundaries and time zones, settings validation, language serialization, and migration from settings without a language field. They use synthetic fixtures and do not query your account.
 
 To recreate the release executable, ZIP package, and checksums:
 

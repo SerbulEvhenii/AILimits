@@ -84,32 +84,51 @@ static class Codex
         var secondary = Get(bucket, "secondary");
         return "Codex   " + Window(primary) + (secondary == null ? "" : "   ·   " + Window(secondary));
     }
-    internal static DateTimeOffset? FiveHourReset(Dictionary<string, object> response)
+    internal static Dictionary<string, object> QuotaWindow(Dictionary<string, object> response, int minutes)
     {
         var buckets = Map(Get(response, "rateLimitsByLimitId"));
         var bucket = Map(Get(buckets, "codex")) ?? Map(Get(response, "rateLimits"));
         foreach (string name in new[] { "primary", "secondary" }) {
             var window = Map(Get(bucket, name));
-            if (Get(window, "windowDurationMins") == null || Convert.ToInt32(Get(window, "windowDurationMins")) != 300) continue;
-            long seconds;
-            if (!long.TryParse(Convert.ToString(Get(window, "resetsAt")), out seconds)) return null;
-            try { return DateTimeOffset.FromUnixTimeSeconds(seconds); }
-            catch (ArgumentOutOfRangeException) { return null; }
+            if (Get(window, "windowDurationMins") != null && Convert.ToInt32(Get(window, "windowDurationMins")) == minutes) return window;
         }
         return null;
     }
-    internal static int BackgroundLevel(Dictionary<string, object> response)
+    internal static DateTimeOffset? Reset(Dictionary<string, object> response, int minutes)
     {
-        var buckets = Map(Get(response, "rateLimitsByLimitId"));
-        var bucket = Map(Get(buckets, "codex")) ?? Map(Get(response, "rateLimits"));
-        foreach (string name in new[] { "primary", "secondary" }) {
-            var window = Map(Get(bucket, name));
-            if (Get(window, "windowDurationMins") == null || Convert.ToInt32(Get(window, "windowDurationMins")) != 300 || Get(window, "usedPercent") == null) continue;
-            double remaining = 100 - Convert.ToDouble(Get(window, "usedPercent"));
-            if (double.IsNaN(remaining) || double.IsInfinity(remaining)) return -1;
-            return remaining >= 90 ? 2 : remaining >= 40 ? 1 : 0;
-        }
-        return -1;
+        long seconds;
+        if (!long.TryParse(Convert.ToString(Get(QuotaWindow(response, minutes), "resetsAt")), out seconds)) return null;
+        try { return DateTimeOffset.FromUnixTimeSeconds(seconds); }
+        catch (ArgumentOutOfRangeException) { return null; }
+    }
+    internal static DateTimeOffset? FiveHourReset(Dictionary<string, object> response) { return Reset(response, 300); }
+    internal static int BackgroundLevel(Dictionary<string, object> response, int minutes = 300)
+    {
+        var window = QuotaWindow(response, minutes);
+        if (Get(window, "usedPercent") == null) return -1;
+        double remaining = 100 - Convert.ToDouble(Get(window, "usedPercent"));
+        if (double.IsNaN(remaining) || double.IsInfinity(remaining)) return -1;
+        return remaining >= 90 ? 2 : remaining >= 40 ? 1 : 0;
+    }
+    internal static string Countdown(DateTimeOffset? reset, DateTimeOffset now)
+    {
+        if (!reset.HasValue) return Ui.Text("Скидання: —", "Reset: —");
+        double minutes = (reset.Value - now).TotalMinutes;
+        if (minutes <= 0) return Ui.Text("Очікуємо скидання", "Awaiting reset");
+        if (minutes < 1) return Ui.Text("Скидання менш ніж за 1 хв", "Resets in <1 min");
+        long total = (long)Math.Ceiling(minutes);
+        string duration = total >= 1440
+            ? total / 1440 + Ui.Text(" д ", "d ") + (total % 1440) / 60 + Ui.Text(" год", "h")
+            : total >= 60 ? total / 60 + Ui.Text(" год ", "h ") + total % 60 + Ui.Text(" хв", "min")
+            : total + Ui.Text(" хв", "min");
+        return Ui.Text("Скидання через ", "Resets in ") + duration;
+    }
+    internal static Color LevelColor(int level, bool dark)
+    {
+        return level == 2 ? (dark ? Color.FromArgb(91, 211, 132) : Color.FromArgb(25, 115, 55))
+            : level == 1 ? (dark ? Color.FromArgb(244, 200, 77) : Color.FromArgb(139, 99, 0))
+            : level == 0 ? (dark ? Color.FromArgb(255, 125, 125) : Color.FromArgb(185, 40, 40))
+            : (dark ? Color.Silver : Color.DimGray);
     }
 }
 
@@ -122,12 +141,14 @@ sealed class Indicator : Form
     readonly Bitmap codexLight = LoadIcon("codex-light.png");
     readonly Font updatedFont = new Font("Segoe UI", 7f);
     string caption;
-    int backgroundLevel = -1;
+    Dictionary<string, object> quota;
+    string countdown;
     bool? updateSucceeded;
     bool fetching;
     bool refreshAgain;
     WidgetSettings settings = WidgetSettings.Load();
     SettingsForm settingsForm;
+    QuotaDetailsForm detailsForm;
     IntPtr taskbar;
     AutomationElement widgetsElement;
     AutomationElement startElement;
@@ -164,21 +185,24 @@ sealed class Indicator : Form
         menu.Items.Add(Ui.Text("Оновити", "Refresh"), null, async delegate { await RefreshQuota(); });
         menu.Items.Add(Ui.Text("Закрити індикатор", "Exit widget"), null, delegate { Close(); });
         ContextMenuStrip = menu;
-        layoutTimer.Tick += delegate { Attach(); };
+        layoutTimer.Tick += delegate { Attach(); UpdateCountdown(); UpdateDetails(); };
+        MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) OpenDetails(); };
         refreshTimer.Tick += async delegate { await RefreshQuota(); };
         refreshTimer.Interval = settings.RefreshSeconds * 1000;
         Shown += async delegate { Attach(); layoutTimer.Start(); refreshTimer.Start(); if (openSettings) BeginInvoke(new Action(OpenSettings)); await RefreshQuota(); };
-        FormClosing += delegate { if (settingsForm != null) settingsForm.Close(); };
+        FormClosing += delegate { if (settingsForm != null) settingsForm.Close(); if (detailsForm != null) detailsForm.Close(); };
         FormClosed += delegate { layoutTimer.Dispose(); refreshTimer.Dispose(); tip.Dispose(); codexDark.Dispose(); codexLight.Dispose(); updatedFont.Dispose(); };
     }
     void OpenSettings()
     {
+        if (detailsForm != null) detailsForm.Close();
         if (settingsForm != null) { settingsForm.Show(); Native.SetForegroundWindow(settingsForm.Handle); return; }
         var dialog = new SettingsForm(settings);
         settingsForm = dialog;
         dialog.FormClosed += delegate {
             settingsForm = null;
             if (dialog.DialogResult == DialogResult.OK && !IsDisposed) {
+                if (detailsForm != null) detailsForm.Close();
                 settings = dialog.Result;
                 Ui.Language = settings.Language;
                 ContextMenuStrip.Items[0].Text = Ui.Text("Налаштування…", "Settings…");
@@ -187,7 +211,7 @@ sealed class Indicator : Form
                 tip.SetToolTip(this, Ui.Text("Codex: підключення…", "Codex: connecting…"));
                 refreshTimer.Interval = settings.RefreshSeconds * 1000;
                 refreshTimer.Stop(); refreshTimer.Start();
-                caption = Ui.Text("Codex: підключення…", "Codex: connecting…"); backgroundLevel = -1; updateSucceeded = null;
+                caption = Ui.Text("Codex: підключення…", "Codex: connecting…"); quota = null; updateSucceeded = null;
                 fiveHourReset = null; lastSuccess = default(DateTime); Invalidate();
                 BeginInvoke(new Action(async delegate { await RefreshQuota(); }));
             }
@@ -201,31 +225,62 @@ sealed class Indicator : Form
         if (fetching) { refreshAgain = true; return; }
         fetching = true;
         var requestSettings = settings;
+        UpdateDetails();
         try {
             var data = await Task.Run(() => Codex.Read(requestSettings.Home));
             if (IsDisposed || requestSettings != settings) return;
             if (Codex.BackgroundLevel(data) < 0) throw new IOException(Ui.Text("Не отримано актуальні дані п’ятигодинного ліміту Codex.", "Current five-hour Codex quota data is unavailable."));
             caption = Codex.Format(data);
-            backgroundLevel = Codex.BackgroundLevel(data);
+            quota = data;
             fiveHourReset = Codex.FiveHourReset(data);
             lastSuccess = DateTime.Now;
-            tip.SetToolTip(this, Ui.Text("Залишок квоти Codex. Оновлено ", "Remaining Codex quota. Updated ") + lastSuccess.ToString("HH:mm:ss"));
+            tip.SetToolTip(this, Ui.Text("Залишок квоти Codex. Оновлено ", "Remaining Codex quota. Updated ") + lastSuccess.ToString("HH:mm:ss")
+                + (fiveHourReset.HasValue ? "\n" + Ui.Text("Скидання 5г: ", "5h reset: ") + fiveHourReset.Value.ToLocalTime().ToString("g", Ui.Culture) : "")
+                + "\n" + Ui.Text("Натисніть, щоб переглянути деталі.", "Click to view details."));
             File.WriteAllText(Path.Combine(Program.DataDir, "status.json"), new JavaScriptSerializer().Serialize(new { updatedAt = DateTime.UtcNow.ToString("o"), text = caption }));
             updateSucceeded = true;
         } catch {
             if (IsDisposed || requestSettings != settings) return;
             updateSucceeded = false;
             caption = "Codex: " + (lastSuccess == default(DateTime) ? Ui.Text("немає зв’язку", "offline") : Ui.Text("дані застаріли", "data is stale"));
-            backgroundLevel = -1;
+            quota = null;
             fiveHourReset = null;
             tip.SetToolTip(this, Ui.Text("Не вдалося оновити квоту. Перевірте з’єднання та вхід у Codex.", "Could not refresh the quota. Check your connection and Codex sign-in."));
         } finally {
             fetching = false;
             if (!IsDisposed) {
+                UpdateCountdown();
+                UpdateDetails();
                 Invalidate();
                 if (refreshAgain) { refreshAgain = false; BeginInvoke(new Action(async delegate { await RefreshQuota(); })); }
             }
         }
+    }
+    void UpdateCountdown()
+    {
+        string next = Codex.Countdown(fiveHourReset, DateTimeOffset.Now);
+        if (countdown == next) return;
+        countdown = next;
+        Invalidate();
+    }
+    void UpdateDetails()
+    {
+        if (detailsForm != null) detailsForm.UpdateQuota(quota, lastSuccess, fetching, caption);
+    }
+    void OpenDetails()
+    {
+        if (detailsForm != null) { detailsForm.Activate(); return; }
+        var dialog = new QuotaDetailsForm(settings.Home, RefreshQuota);
+        detailsForm = dialog;
+        dialog.FormClosed += delegate { detailsForm = null; dialog.Dispose(); };
+        UpdateDetails();
+        var anchor = RectangleToScreen(ClientRectangle);
+        dialog.Location = new Point(anchor.Left, anchor.Top - dialog.Height - 8);
+        dialog.Show();
+        var area = Screen.FromRectangle(anchor).WorkingArea;
+        dialog.Location = new Point(Math.Max(area.Left, Math.Min(anchor.Left, area.Right - dialog.Width)),
+            Math.Max(area.Top, Math.Min(anchor.Top - dialog.Height - 8, area.Bottom - dialog.Height)));
+        Native.SetForegroundWindow(dialog.Handle);
     }
     void Attach()
     {
@@ -284,23 +339,11 @@ sealed class Indicator : Form
         bool dark = ForeColor.GetBrightness() > 0.5f;
         Color panelColor = dark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(245, 245, 245);
         Color borderColor = dark ? Color.FromArgb(67, 67, 67) : Color.FromArgb(207, 207, 207);
-        if (backgroundLevel == 2) {
-            panelColor = dark ? Color.FromArgb(30, 85, 49) : Color.FromArgb(200, 237, 210);
-            borderColor = dark ? Color.FromArgb(57, 133, 79) : Color.FromArgb(117, 181, 136);
-        } else if (backgroundLevel == 1) {
-            panelColor = dark ? Color.FromArgb(101, 80, 10) : Color.FromArgb(255, 235, 155);
-            borderColor = dark ? Color.FromArgb(159, 128, 27) : Color.FromArgb(202, 170, 67);
-        } else if (backgroundLevel == 0) {
-            panelColor = dark ? Color.FromArgb(111, 39, 39) : Color.FromArgb(250, 205, 205);
-            borderColor = dark ? Color.FromArgb(166, 65, 65) : Color.FromArgb(207, 129, 129);
-        }
         int iconSize = (int)(20 * scale);
         int padding = (int)(10 * scale);
         int textLeft = padding + iconSize + (int)(8 * scale);
         string displayText = caption.StartsWith("Codex", StringComparison.Ordinal) ? caption.Substring(5).TrimStart(':', ' ') : caption;
-        var textFlags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
-        int textWidth = TextRenderer.MeasureText(e.Graphics, displayText, Font, new Size(int.MaxValue, ClientSize.Height), textFlags).Width;
-        int panelWidth = Math.Min(ClientSize.Width - 2, textLeft + textWidth + padding);
+        int panelWidth = Math.Min(ClientSize.Width - 2, (int)(270 * scale));
         int panelHeight = Math.Min(ClientSize.Height - 2, (int)(38 * scale));
         var panel = new RectangleF(0.5f, (ClientSize.Height - panelHeight) / 2f, panelWidth, panelHeight);
         float diameter = 16 * scale;
@@ -319,14 +362,26 @@ sealed class Indicator : Form
         e.Graphics.DrawImage(dark ? codexDark : codexLight,
             new Rectangle(padding, (int)(panel.Top + (panel.Height - iconSize) / 2), iconSize, iconSize));
         var textBounds = new Rectangle(textLeft, topRowY, Math.Max(0, panelWidth - textLeft - padding), topRowHeight);
-        TextRenderer.DrawText(e.Graphics, displayText, Font, textBounds, ForeColor, panelColor,
-            TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-        string updatedText = fiveHourReset.HasValue
-            ? Ui.Text("Скидання о ", "Resets at ") + fiveHourReset.Value.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
-            : Ui.Text("Скидання: —", "Reset: —");
-        var updatedBounds = new Rectangle(padding, (int)panel.Top + (int)(23 * scale),
-            Math.Max(0, panelWidth - 2 * padding), (int)(12 * scale));
-        TextRenderer.DrawText(e.Graphics, updatedText, updatedFont, updatedBounds, ForeColor, panelColor,
+        if (quota == null) {
+            TextRenderer.DrawText(e.Graphics, displayText, Font, textBounds, ForeColor, panelColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+        } else {
+            int cellWidth = textBounds.Width / 2;
+            foreach (int minutes in new[] { 300, 10080 }) {
+                int left = textLeft + (minutes == 300 ? 0 : cellWidth);
+                Color color = Codex.LevelColor(Codex.BackgroundLevel(quota, minutes), dark);
+                using (var brush = new SolidBrush(color)) e.Graphics.FillEllipse(brush, left, topRowY + 8 * scale, 5 * scale, 5 * scale);
+                string value = Codex.BackgroundLevel(quota, minutes) < 0
+                    ? (minutes == 300 ? Ui.Text("5г: —", "5h: —") : Ui.Text("7д: —", "7d: —"))
+                    : Codex.Window(Codex.QuotaWindow(quota, minutes));
+                TextRenderer.DrawText(e.Graphics, value, Font,
+                    new Rectangle(left + (int)(9 * scale), topRowY, Math.Max(0, cellWidth - (int)(10 * scale)), topRowHeight), color, panelColor,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            }
+        }
+        var updatedBounds = new Rectangle(textLeft, (int)panel.Top + (int)(23 * scale),
+            Math.Max(0, panelWidth - textLeft - (int)(25 * scale)), (int)(12 * scale));
+        TextRenderer.DrawText(e.Graphics, Codex.Countdown(fiveHourReset, DateTimeOffset.Now), updatedFont, updatedBounds, ForeColor, panelColor,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         float dotSize = 6 * scale;
         var dot = new RectangleF(panel.Right - 9 * scale - dotSize,
@@ -341,6 +396,68 @@ sealed class Indicator : Form
         if (m.Msg == 0x802A) { BeginInvoke(new Action(OpenSettings)); return; }
         if (m.Msg == 0x21) { m.Result = new IntPtr(3); return; }
         base.WndProc(ref m);
+    }
+}
+
+sealed class QuotaDetailsForm : Form
+{
+    readonly Label account = new Label { AutoSize = true, MaximumSize = new Size(330, 0) };
+    readonly Label fiveHour = new Label { AutoSize = true, MaximumSize = new Size(330, 0), Margin = new Padding(3, 14, 3, 0) };
+    readonly Label weekly = new Label { AutoSize = true, MaximumSize = new Size(330, 0), Margin = new Padding(3, 14, 3, 0) };
+    readonly Label updated = new Label { AutoSize = true, MaximumSize = new Size(330, 0), Margin = new Padding(3, 14, 3, 12) };
+    readonly Button refresh = new Button { AutoSize = true, MinimumSize = new Size(120, 32) };
+    internal QuotaDetailsForm(string home, Func<Task> refreshQuota)
+    {
+        Text = Ui.Text("Залишок квоти Codex", "Remaining Codex quota");
+        Font = new Font("Segoe UI", 10f);
+        AutoScaleDimensions = new SizeF(96, 96);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        FormBorderStyle = FormBorderStyle.FixedToolWindow;
+        ShowInTaskbar = false; TopMost = true; MaximizeBox = false; MinimizeBox = false;
+        StartPosition = FormStartPosition.Manual;
+        ClientSize = new Size(370, 340);
+        var content = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown,
+            WrapContents = false, AutoScroll = true, Padding = new Padding(16) };
+        account.Text = Ui.Text("Перевірка акаунта…", "Checking account…");
+        content.Controls.Add(account); content.Controls.Add(fiveHour); content.Controls.Add(weekly);
+        content.Controls.Add(updated); content.Controls.Add(refresh); Controls.Add(content);
+        refresh.Text = Ui.Text("Оновити", "Refresh");
+        refresh.Click += async delegate { refresh.Enabled = false; await refreshQuota(); };
+        KeyPreview = true;
+        KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); };
+        Deactivate += delegate { Close(); };
+        Shown += async delegate {
+            try {
+                string name = await Task.Run(async delegate {
+                    using (var session = new CodexSession(home)) {
+                        await session.Initialize();
+                        return SettingsForm.AccountName(await session.Request("account/read", new { refreshToken = false }));
+                    }
+                });
+                if (!IsDisposed) account.Text = name;
+            } catch { if (!IsDisposed) account.Text = Ui.Text("Не вдалося перевірити акаунт.", "Could not check the account."); }
+        };
+    }
+    internal void UpdateQuota(Dictionary<string, object> data, DateTime lastSuccess, bool fetching, string status)
+    {
+        var now = DateTimeOffset.Now;
+        SetWindow(fiveHour, data, 300, now);
+        SetWindow(weekly, data, 10080, now);
+        updated.Text = (data == null ? status + "\n" : "") + Ui.Text("Оновлено: ", "Updated: ")
+            + (lastSuccess == default(DateTime) ? "—" : lastSuccess.ToString("g", Ui.Culture));
+        refresh.Enabled = !fetching;
+        refresh.Text = fetching ? Ui.Text("Оновлення…", "Refreshing…") : Ui.Text("Оновити", "Refresh");
+    }
+    static void SetWindow(Label label, Dictionary<string, object> data, int minutes, DateTimeOffset now)
+    {
+        int level = Codex.BackgroundLevel(data, minutes);
+        var reset = Codex.Reset(data, minutes);
+        string title = minutes == 300 ? Ui.Text("5 годин", "5 hours") : Ui.Text("Тиждень", "Weekly");
+        label.Text = title + " · " + (level < 0 ? Ui.Text("немає даних", "no data")
+            : Codex.Window(Codex.QuotaWindow(data, minutes)).Split(':')[1].Trim() + Ui.Text(" залишилось", " remaining"))
+            + "\n" + Codex.Countdown(reset, now)
+            + (reset.HasValue ? "\n" + reset.Value.ToLocalTime().ToString("f", Ui.Culture) : "");
+        label.ForeColor = Codex.LevelColor(level, false);
     }
 }
 
@@ -399,6 +516,26 @@ static class Tests
         check("{\"rateLimits\":{\"primary\":{\"usedPercent\":50}}}", "Codex   Limit: 50%");
         Ui.Language = "uk";
         check("{}", "Codex: немає даних");
-        File.WriteAllText(Path.Combine(Program.DataDir, "tests.txt"), "PASS: 11 bilingual quota formatting; 9 background; 4 reset timestamp cases; settings validation, language roundtrip and legacy fallback");
+        var independent = json.Deserialize<Dictionary<string, object>>("{\"rateLimitsByLimitId\":{\"codex\":{\"primary\":{\"usedPercent\":99,\"windowDurationMins\":10080,\"resetsAt\":1700600000},\"secondary\":{\"usedPercent\":5,\"windowDurationMins\":300,\"resetsAt\":1700000000}}}}");
+        if (Codex.BackgroundLevel(independent, 300) != 2 || Codex.BackgroundLevel(independent, 10080) != 0) throw new Exception("Quota colors must be independent of each other and window order");
+        if (Codex.Reset(independent, 10080) != DateTimeOffset.FromUnixTimeSeconds(1700600000)) throw new Exception("Wrong weekly reset");
+        if (Codex.QuotaWindow(resetFixture, 10080) != null) throw new Exception("Do not mix quota buckets");
+        var invalidReset = json.Deserialize<Dictionary<string, object>>("{\"rateLimits\":{\"secondary\":{\"windowDurationMins\":10080,\"resetsAt\":9223372036854775807}}}");
+        if (Codex.Reset(invalidReset, 10080) != null) throw new Exception("Out-of-range reset must be unknown");
+        var now = DateTimeOffset.FromUnixTimeSeconds(1700000000);
+        foreach (string language in new[] { "uk", "en" }) {
+            Ui.Language = language;
+            if (Codex.Countdown(null, now) != Ui.Text("Скидання: —", "Reset: —")) throw new Exception("Unknown countdown");
+            foreach (int seconds in new[] { -60, 0 })
+                if (Codex.Countdown(now.AddSeconds(seconds), now) != Ui.Text("Очікуємо скидання", "Awaiting reset")) throw new Exception("Expired reset must wait for fresh data");
+            if (Codex.Countdown(now.AddSeconds(30), now) != Ui.Text("Скидання менш ніж за 1 хв", "Resets in <1 min")) throw new Exception("Sub-minute countdown");
+            if (Codex.Countdown(now.AddMinutes(1), now) != Ui.Text("Скидання через 1 хв", "Resets in 1min")) throw new Exception("Minute countdown");
+            if (Codex.Countdown(now.AddMinutes(84), now) != Ui.Text("Скидання через 1 год 24 хв", "Resets in 1h 24min")) throw new Exception("Hour countdown");
+            if (Codex.Countdown(now.AddMinutes(84).AddSeconds(1), now) != Ui.Text("Скидання через 1 год 25 хв", "Resets in 1h 25min")) throw new Exception("Round countdown up");
+            if (Codex.Countdown(now.AddDays(2).AddHours(3), now) != Ui.Text("Скидання через 2 д 3 год", "Resets in 2d 3h")) throw new Exception("Weekly countdown");
+            if (Codex.Countdown(now.AddMinutes(84), now.ToOffset(TimeSpan.FromHours(5))) != Codex.Countdown(now.AddMinutes(84), now)) throw new Exception("Countdown must use absolute time");
+        }
+        Ui.Language = "uk";
+        File.WriteAllText(Path.Combine(Program.DataDir, "tests.txt"), "PASS: bilingual quota formatting, independent colors and window selection, both reset timestamps, countdown boundaries and time zones; settings validation, language roundtrip and legacy fallback");
     }
 }
