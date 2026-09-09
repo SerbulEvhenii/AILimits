@@ -5,7 +5,7 @@
 <h1 align="center">AILimits</h1>
 <p align="center"><strong>Your Codex quota. Always in sight.</strong></p>
 <p align="center">A compact Windows 11 taskbar companion that shows your remaining Codex limits, reset time, and connection status — in Ukrainian or English.</p>
-<p align="center"><a href="https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4">Download v0.4</a> · <a href="#getting-started">Getting started</a> · <a href="#privacy">Privacy</a> · <a href="https://github.com/SerbulEvhenii/AILimits/issues">Report an issue</a></p>
+<p align="center"><a href="https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4.1">Download v0.4.1</a> · <a href="#getting-started">Getting started</a> · <a href="#privacy">Privacy</a> · <a href="https://github.com/SerbulEvhenii/AILimits/issues">Report an issue</a></p>
 
 ## Stay focused, stay informed
 
@@ -23,6 +23,10 @@ AILimits sits beside Windows Widgets on your taskbar, keeping your Codex allowan
 - **Start with Windows**, controlled by a checkbox in Settings for your Windows user without administrator access.
 
 For example, `5h: 84% · 7d: 97%` means **84% remaining in the five-hour window** and **97% remaining in the weekly window**. In Ukrainian, the same values appear as `5г: 84% · 7д: 97%`.
+
+## New in v0.4.1
+
+The widget fits its quota text and reset countdown instead of using a fixed 270-pixel width. The dots beside the quota percentages have been removed; each quota keeps its own text color.
 
 ## New in v0.4
 
@@ -52,16 +56,16 @@ Ukrainian remains the default, including when upgrading from v0.1. Your existing
 
 ### Run the executable
 
-1. Download **AILimits-v0.4-win-x64.exe** from [Releases](https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4).
+1. Download **AILimits-v0.4.1-win-x64.exe** from [Releases](https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4.1).
 2. Run the executable. The indicator appears beside Windows Widgets when the supported layout is available.
 3. Right-click it to open **Налаштування… / Settings…**, **Оновити / Refresh**, or **Закрити індикатор / Exit widget**.
 4. To switch to English, open **Налаштування…**, choose **English** under **Мова / Language**, and click **Зберегти**.
 
-The v0.4 executable is unsigned, so Windows may show an unknown-publisher warning. Download only from this repository's releases; SHA-256 checksums are included.
+The v0.4.1 executable is unsigned, so Windows may show an unknown-publisher warning. Download only from this repository's releases; SHA-256 checksums are included.
 
 ### Install with automatic startup
 
-Download and extract **AILimits-v0.4-win-x64.zip**, then run PowerShell in the extracted folder:
+Download and extract **AILimits-v0.4.1-win-x64.zip**, then run PowerShell in the extracted folder:
 
 ```powershell
 .\scripts\install.ps1
@@ -135,7 +139,7 @@ AILimits is a C# / .NET Framework desktop process. It embeds a Win32 child windo
 
 Each refresh starts a short-lived local Codex app-server session, reads `account/rateLimits/read`, and closes the session. If the required taskbar elements or enough free space are unavailable, the indicator hides to avoid covering taskbar buttons.
 
-## v0.4 limitations
+## v0.4.1 limitations
 
 This is an early release using an unofficial taskbar integration. Windows updates may require compatibility fixes. Multi-monitor layouts, DPI changes, auto-hide, fullscreen behavior, and Explorer restarts have not received complete interactive validation. Restart AILimits if it does not reattach after Explorer restarts. End-to-end switching to another account also requires further user testing.
 

@@ -14,9 +14,9 @@ using Microsoft.Win32;
 [assembly: System.Reflection.AssemblyTitle("AILimits")]
 [assembly: System.Reflection.AssemblyDescription("Codex quota indicator for the Windows 11 taskbar")]
 [assembly: System.Reflection.AssemblyProduct("AILimits")]
-[assembly: System.Reflection.AssemblyVersion("0.4.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.4.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("0.4")]
+[assembly: System.Reflection.AssemblyVersion("0.4.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.4.1.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("0.4.1")]
 
 static class Program
 {
@@ -343,7 +343,23 @@ sealed class Indicator : Form
         int padding = (int)(10 * scale);
         int textLeft = padding + iconSize + (int)(8 * scale);
         string displayText = caption.StartsWith("Codex", StringComparison.Ordinal) ? caption.Substring(5).TrimStart(':', ' ') : caption;
-        int panelWidth = Math.Min(ClientSize.Width - 2, (int)(270 * scale));
+        var textFlags = TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
+        string[] values = new string[2];
+        int quotaWidth = 0;
+        for (int i = 0; i < values.Length; i++) {
+            int minutes = i == 0 ? 300 : 10080;
+            values[i] = Codex.BackgroundLevel(quota, minutes) < 0
+                ? (i == 0 ? Ui.Text("5г: —", "5h: —") : Ui.Text("7д: —", "7d: —"))
+                : Codex.Window(Codex.QuotaWindow(quota, minutes));
+            quotaWidth = Math.Max(quotaWidth, TextRenderer.MeasureText(e.Graphics, values[i], Font, Size.Empty, textFlags).Width);
+        }
+        int quotaGap = (int)(12 * scale);
+        int textWidth = quota == null ? TextRenderer.MeasureText(e.Graphics, displayText, Font, Size.Empty, textFlags).Width
+            : 2 * quotaWidth + quotaGap;
+        string resetText = Codex.Countdown(fiveHourReset, DateTimeOffset.Now);
+        int resetWidth = TextRenderer.MeasureText(e.Graphics, resetText, updatedFont, Size.Empty, textFlags).Width;
+        int panelWidth = Math.Min(ClientSize.Width - 2,
+            textLeft + Math.Max(textWidth + padding, resetWidth + (int)(25 * scale)));
         int panelHeight = Math.Min(ClientSize.Height - 2, (int)(38 * scale));
         var panel = new RectangleF(0.5f, (ClientSize.Height - panelHeight) / 2f, panelWidth, panelHeight);
         float diameter = 16 * scale;
@@ -366,22 +382,19 @@ sealed class Indicator : Form
             TextRenderer.DrawText(e.Graphics, displayText, Font, textBounds, ForeColor, panelColor,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         } else {
-            int cellWidth = textBounds.Width / 2;
-            foreach (int minutes in new[] { 300, 10080 }) {
-                int left = textLeft + (minutes == 300 ? 0 : cellWidth);
+            int cellWidth = Math.Max(0, (textBounds.Width - quotaGap) / 2);
+            for (int i = 0; i < values.Length; i++) {
+                int minutes = i == 0 ? 300 : 10080;
+                int left = textLeft + i * (cellWidth + quotaGap);
                 Color color = Codex.LevelColor(Codex.BackgroundLevel(quota, minutes), dark);
-                using (var brush = new SolidBrush(color)) e.Graphics.FillEllipse(brush, left, topRowY + 8 * scale, 5 * scale, 5 * scale);
-                string value = Codex.BackgroundLevel(quota, minutes) < 0
-                    ? (minutes == 300 ? Ui.Text("5г: —", "5h: —") : Ui.Text("7д: —", "7d: —"))
-                    : Codex.Window(Codex.QuotaWindow(quota, minutes));
-                TextRenderer.DrawText(e.Graphics, value, Font,
-                    new Rectangle(left + (int)(9 * scale), topRowY, Math.Max(0, cellWidth - (int)(10 * scale)), topRowHeight), color, panelColor,
+                TextRenderer.DrawText(e.Graphics, values[i], Font,
+                    new Rectangle(left, topRowY, cellWidth, topRowHeight), color, panelColor,
                     TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             }
         }
         var updatedBounds = new Rectangle(textLeft, (int)panel.Top + (int)(23 * scale),
             Math.Max(0, panelWidth - textLeft - (int)(25 * scale)), (int)(12 * scale));
-        TextRenderer.DrawText(e.Graphics, Codex.Countdown(fiveHourReset, DateTimeOffset.Now), updatedFont, updatedBounds, ForeColor, panelColor,
+        TextRenderer.DrawText(e.Graphics, resetText, updatedFont, updatedBounds, ForeColor, panelColor,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         float dotSize = 6 * scale;
         var dot = new RectangleF(panel.Right - 9 * scale - dotSize,

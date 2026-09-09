@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path $PSScriptRoot -Parent
 $distDir = Join-Path $projectDir 'dist'
-$packageName = 'AILimits-v0.4-win-x64'
+$packageName = 'AILimits-v0.4.1-win-x64'
 $packageDir = Join-Path $distDir ($packageName + '-' + [Guid]::NewGuid().ToString('N'))
 
 New-Item -ItemType Directory -Force $distDir | Out-Null
@@ -9,7 +9,7 @@ $buildPath = Join-Path $distDir ($packageName + '.exe')
 & (Join-Path $PSScriptRoot 'build.ps1') -OutputPath $buildPath
 $test = Start-Process -FilePath $buildPath -ArgumentList '--test' -WindowStyle Hidden -Wait -PassThru
 if ($test.ExitCode -ne 0) { throw 'Release checks failed' }
-if ([Diagnostics.FileVersionInfo]::GetVersionInfo($buildPath).FileVersion -ne '0.4.0.0') { throw 'Unexpected release version' }
+if ([Diagnostics.FileVersionInfo]::GetVersionInfo($buildPath).FileVersion -ne '0.4.1.0') { throw 'Unexpected release version' }
 
 New-Item -ItemType Directory -Force $distDir | Out-Null
 New-Item -ItemType Directory (Join-Path $packageDir 'bin') | Out-Null
