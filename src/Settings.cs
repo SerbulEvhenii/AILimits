@@ -114,7 +114,7 @@ sealed class CodexSession : IDisposable
     }
     internal async Task Initialize()
     {
-        await Request("initialize", new { clientInfo = new { name = "ai_limits_taskbar", title = "AI Limits Taskbar", version = "0.3.0" } });
+        await Request("initialize", new { clientInfo = new { name = "ai_limits_taskbar", title = "AI Limits Taskbar", version = "0.4.0" } });
         await process.StandardInput.WriteLineAsync("{\"method\":\"initialized\",\"params\":{}}");
     }
     async Task<Dictionary<string, object>> Next(Task deadline)

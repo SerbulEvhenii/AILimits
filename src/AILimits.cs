@@ -14,9 +14,9 @@ using Microsoft.Win32;
 [assembly: System.Reflection.AssemblyTitle("AILimits")]
 [assembly: System.Reflection.AssemblyDescription("Codex quota indicator for the Windows 11 taskbar")]
 [assembly: System.Reflection.AssemblyProduct("AILimits")]
-[assembly: System.Reflection.AssemblyVersion("0.3.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.3.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("0.3")]
+[assembly: System.Reflection.AssemblyVersion("0.4.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.4.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("0.4")]
 
 static class Program
 {

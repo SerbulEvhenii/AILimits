@@ -5,7 +5,7 @@
 <h1 align="center">AILimits</h1>
 <p align="center"><strong>Your Codex quota. Always in sight.</strong></p>
 <p align="center">A compact Windows 11 taskbar companion that shows your remaining Codex limits, reset time, and connection status — in Ukrainian or English.</p>
-<p align="center"><a href="https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.3">Download v0.3</a> · <a href="#getting-started">Getting started</a> · <a href="#privacy">Privacy</a> · <a href="https://github.com/SerbulEvhenii/AILimits/issues">Report an issue</a></p>
+<p align="center"><a href="https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4">Download v0.4</a> · <a href="#getting-started">Getting started</a> · <a href="#privacy">Privacy</a> · <a href="https://github.com/SerbulEvhenii/AILimits/issues">Report an issue</a></p>
 
 ## Stay focused, stay informed
 
@@ -24,9 +24,13 @@ AILimits sits beside Windows Widgets on your taskbar, keeping your Codex allowan
 
 For example, `5h: 84% · 7d: 97%` means **84% remaining in the five-hour window** and **97% remaining in the weekly window**. In Ukrainian, the same values appear as `5г: 84% · 7д: 97%`.
 
-## New in v0.3
+## New in v0.4
 
-The independent quota colors, countdown, and left-click details above are available in the current source build, after v0.3. The v0.3 downloads still use the previous five-hour background color and reset-time display.
+Each quota now has its own colored indicator, so a low weekly allowance stays visible even when the five-hour allowance is high. The taskbar shows a countdown to the five-hour reset; hover for its exact local time. The countdown updates locally without extra quota requests and shows “Awaiting reset” when the recorded reset time passes, until fresh data arrives.
+
+Left-click the widget to open a details panel with both remaining allowances, countdowns and exact reset dates, the active account, the last update time, and a Refresh button. Press Escape or click outside to close it. Both Ukrainian and English are supported, including localized dates. Unknown quota values remain marked as unavailable.
+
+## Start with Windows (since v0.3)
 
 Turn **Start with Windows / Запускати разом із Windows** on or off in Settings, then click **Save / Зберегти**. AILimits creates or removes its per-user Startup shortcut, so it can launch automatically when you sign in to Windows. Cancel leaves startup unchanged. The checkbox reflects whether the existing `AILimits.lnk` shortcut is present, including one created by the installer.
 
@@ -48,16 +52,16 @@ Ukrainian remains the default, including when upgrading from v0.1. Your existing
 
 ### Run the executable
 
-1. Download **AILimits-v0.3-win-x64.exe** from [Releases](https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.3).
+1. Download **AILimits-v0.4-win-x64.exe** from [Releases](https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.4).
 2. Run the executable. The indicator appears beside Windows Widgets when the supported layout is available.
 3. Right-click it to open **Налаштування… / Settings…**, **Оновити / Refresh**, or **Закрити індикатор / Exit widget**.
 4. To switch to English, open **Налаштування…**, choose **English** under **Мова / Language**, and click **Зберегти**.
 
-The v0.3 executable is unsigned, so Windows may show an unknown-publisher warning. Download only from this repository's releases; SHA-256 checksums are included.
+The v0.4 executable is unsigned, so Windows may show an unknown-publisher warning. Download only from this repository's releases; SHA-256 checksums are included.
 
 ### Install with automatic startup
 
-Download and extract **AILimits-v0.3-win-x64.zip**, then run PowerShell in the extracted folder:
+Download and extract **AILimits-v0.4-win-x64.zip**, then run PowerShell in the extracted folder:
 
 ```powershell
 .\scripts\install.ps1
@@ -85,7 +89,7 @@ Open Settings from the right-click menu, or run `AILimits.exe --settings`.
 
 **Sign in to another account… / Увійти в інший акаунт…** opens the official browser sign-in flow. Complete sign-in and click **Save / Зберегти** to apply it. The separate profile does not replace your main Codex sign-in. The external browser sign-in page uses its own language preferences.
 
-To upgrade from v0.1 or v0.2, exit the old widget before running the new executable, or extract the new ZIP and run its installer. Local settings and account profiles are retained. The [v0.1 release](https://github.com/SerbulEvhenii/AILimits/releases/tag/v0.1) remains available.
+To upgrade from an earlier version, exit the old widget before running the new executable, or extract the new ZIP and run its installer. Local settings and account profiles are retained. Previous releases remain available.
 
 ## Privacy
 
@@ -131,7 +135,7 @@ AILimits is a C# / .NET Framework desktop process. It embeds a Win32 child windo
 
 Each refresh starts a short-lived local Codex app-server session, reads `account/rateLimits/read`, and closes the session. If the required taskbar elements or enough free space are unavailable, the indicator hides to avoid covering taskbar buttons.
 
-## v0.3 limitations
+## v0.4 limitations
 
 This is an early release using an unofficial taskbar integration. Windows updates may require compatibility fixes. Multi-monitor layouts, DPI changes, auto-hide, fullscreen behavior, and Explorer restarts have not received complete interactive validation. Restart AILimits if it does not reattach after Explorer restarts. End-to-end switching to another account also requires further user testing.
 
