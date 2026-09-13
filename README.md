@@ -24,6 +24,10 @@ AILimits sits beside Windows Widgets on your taskbar, keeping your Codex allowan
 
 For example, `5h: 84% · 7d: 97%` means **84% remaining in the five-hour window** and **97% remaining in the weekly window**. In Ukrainian, the same values appear as `5г: 84% · 7д: 97%`.
 
+## New in v0.4.3
+
+Settings now shows the running application's version in Ukrainian or English, read directly from the build metadata.
+
 ## New in v0.4.2
 
 Taskbar UI Automation runs on one dedicated background MTA thread, keeping the widget UI and quota refreshes independent of slow or unresponsive layout queries. Old layouts are rejected after ten seconds or when the taskbar window/process changes. The widget recreates its attachment window and retries when Explorer restarts. Closing the widget does not wait for a blocked layout query.
