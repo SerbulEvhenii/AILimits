@@ -187,7 +187,7 @@ sealed class SettingsForm : Form
         Text = Ui.Text("Налаштування AILimits", "AILimits Settings");
         Font = new Font("Segoe UI", 10f);
         AutoScaleMode = AutoScaleMode.None;
-        ClientSize = new Size(490, 555);
+        ClientSize = new Size(490, 585);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -197,6 +197,7 @@ sealed class SettingsForm : Form
         profileId = current.ProfileId; accountLabel = current.AccountLabel;
         interval.Value = current.RefreshSeconds;
         var content = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(20), AutoScroll = true };
+        content.Controls.Add(new Label { Text = Ui.Text("Версія програми: ", "App version: ") + Application.ProductVersion, AutoSize = true, Margin = new Padding(3, 0, 3, 12) });
         content.Controls.Add(new Label { Text = Ui.Text("Мова / Language", "Language / Мова"), AutoSize = true });
         language.Items.AddRange(new object[] { "Українська", "English" });
         language.SelectedIndex = current.Language == "en" ? 1 : 0;
